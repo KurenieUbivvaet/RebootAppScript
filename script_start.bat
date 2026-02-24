@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Запуск от имени администратора...
