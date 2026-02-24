@@ -2,6 +2,9 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+<<<<<<< HEAD
     <mapping directory="$PROJECT_DIR$/RebootAppScript" vcs="Git" />
+=======
+>>>>>>> 023cf553edc067243c4d6775a58f228c7d8ff94f
   </component>
 </project>

@@ -1,10 +1,13 @@
 @echo off
+<<<<<<< HEAD
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Запуск от имени администратора...
     powershell start -verb runas '%0'
     exit /b
 )
+=======
+>>>>>>> 023cf553edc067243c4d6775a58f228c7d8ff94f
 cd /d "%~dp0"
 
 rem Проверяем существование виртуальной среды
