@@ -12,7 +12,6 @@ process_name_conf = config["process_name"]
 file_to_run_conf = config["file_to_run"]
 timeout_conf = config["timeout"]
 
-<<<<<<< HEAD
 def format_time(time_str):
     parts = time_str.split(':')
     if len(parts) == 2:
@@ -21,11 +20,6 @@ def format_time(time_str):
 
 def main():
     target_time = format_time(target_time_conf)
-=======
-
-def main():
-    target_time = target_time_conf
->>>>>>> 023cf553edc067243c4d6775a58f228c7d8ff94f
     schedule_task_daily(target_time)
 
 def schedule_task_daily(target_time):
@@ -82,15 +76,9 @@ def diagnose_process(process_name):
     # 1. Tasklist
     print("\n1. Результат tasklist:")
     result = subprocess.run('tasklist', shell=True, capture_output=True, text=True, encoding='cp866')
-<<<<<<< HEAD
     print(result.stdout[:2000])
 
     # 2. Поиск процесса
-=======
-    print(result.stdout[:2000])  # Первые 2000 символов
-
-    # 2. Поиск конкретного процесса
->>>>>>> 023cf553edc067243c4d6775a58f228c7d8ff94f
     print(f"\n2. Поиск '{process_name}':")
     cmd = f'tasklist | findstr /i "{process_name}"'
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp866')
@@ -108,20 +96,9 @@ def diagnose_process(process_name):
 
     # 4. PowerShell (ИСПРАВЛЕННАЯ СТРОКА)
     print(f"\n4. Поиск через PowerShell:")
-<<<<<<< HEAD
     ps_name = process_name.replace('.exe', '')
     cmd = f'powershell "Get-Process {ps_name} -ErrorAction SilentlyContinue | Format-Table Id,Name,Path"'
 
-=======
-
-    # Способ 1: Без звездочки (проще)
-    ps_name = process_name.replace('.exe', '')
-    cmd = f'powershell "Get-Process {ps_name} -ErrorAction SilentlyContinue | Format-Table Id,Name,Path"'
-
-    # ИЛИ Способ 2: С правильным экранированием
-    # cmd = f'powershell "Get-Process *{ps_name}* -ErrorAction SilentlyContinue | Format-Table Id,Name,Path"'
-
->>>>>>> 023cf553edc067243c4d6775a58f228c7d8ff94f
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp866')
     print(result.stdout if result.stdout else "Не найдено через PowerShell")
 

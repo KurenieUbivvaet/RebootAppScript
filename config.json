@@ -1,9 +1,6 @@
 {
-<<<<<<< HEAD
   "target_time": "23:10",
-=======
   "target_time": "13:33",
->>>>>>> 023cf553edc067243c4d6775a58f228c7d8ff94f
   "process_name": "assistant.exe",
   "file_to_run": "C:/Program Files (x86)/Ассистент/assistant.exe",
   "timeout": 60
