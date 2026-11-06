@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "RebootAppScript"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 TASK_NAME = "RebootAppScript"
 
 IS_WINDOWS = os.name == "nt"
@@ -855,6 +855,56 @@ def next_run_text(cfg):
     )
 
 
+def print_restart_plan(cfg, config_path):
+    """Показывает, что произойдёт при перезапуске, но ничего не делает."""
+    pids = find_pids(cfg["process_name"])
+    app_path = Path(cfg["file_to_run"])
+    command = [str(app_path)] + list(cfg["app_args"])
+
+    print("План перезапуска (проверка, ничего не выполняется)")
+    print("Конфигурация: %s" % config_path)
+    print("Время:        %s" % cfg["target_time"])
+    print("Следующий:    %s" % next_run_text(cfg))
+    print()
+
+    if pids:
+        print(
+            "1. Завершить процесс %s (PID: %s)"
+            % (cfg["process_name"], ", ".join(str(pid) for pid in pids))
+        )
+        print("   taskkill /F /T /IM %s" % cfg["process_name"])
+        print("   ждать завершения до %d с" % cfg["kill_timeout"])
+    else:
+        print(
+            "1. Процесс %s не запущен - завершение не требуется"
+            % cfg["process_name"]
+        )
+
+    print("2. Пауза %d с" % cfg["timeout"])
+    print("3. Запустить: %s" % subprocess.list2cmdline(command))
+    print("   рабочая папка: %s" % app_path.parent)
+    print(
+        "4. Проверить процесс: до %d с, попыток запуска: %d"
+        % (cfg["launch_check_seconds"], cfg["launch_retries"] + 1)
+    )
+    print()
+
+    if app_path.is_file():
+        print("[OK] Файл приложения найден")
+    else:
+        print("[ОШИБКА] Файл приложения не найден: %s" % app_path)
+
+    if is_admin():
+        print("[OK] Права администратора есть")
+    else:
+        print(
+            "[!] Нет прав администратора: завершение процесса может быть запрещено. "
+            "Автозапуск через install.bat решает эту проблему."
+        )
+
+    return 0 if app_path.is_file() else 4
+
+
 def print_status(cfg, config_path):
     state = read_state(state_path_for(config_path))
     now = dt.datetime.now()
@@ -991,6 +1041,11 @@ def build_parser():
     )
     group.add_argument("--status", action="store_true", help="показать состояние")
     group.add_argument("--check", action="store_true", help="проверить конфигурацию")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="показать план перезапуска, ничего не выполняя",
+    )
     group.add_argument(
         "--init-config", action="store_true", help="создать config.json по умолчанию"
     )
@@ -1027,6 +1082,9 @@ def main(argv=None):
 
     if args.check:
         return check_config(cfg, config_path)
+
+    if args.dry_run:
+        return print_restart_plan(cfg, config_path)
 
     if args.status:
         print_status(cfg, config_path)

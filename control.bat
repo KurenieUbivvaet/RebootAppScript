@@ -14,6 +14,7 @@ set "ELEVATED=%~2"
 if not defined ACTION goto :main_menu
 if /i "%ACTION%"=="menu" goto :main_menu
 if /i "%ACTION%"=="status" goto :direct_status
+if /i "%ACTION%"=="check" goto :direct_check
 if /i "%ACTION%"=="restart" goto :direct_restart
 if /i "%ACTION%"=="start" goto :direct_start
 if /i "%ACTION%"=="stop" goto :direct_stop
@@ -24,7 +25,7 @@ if /i "%ACTION%"=="uninstall" goto :direct_uninstall
 
 echo Неизвестная команда: %ACTION%
 echo.
-echo Команды: status, restart, start, stop, config, logs, install, uninstall
+echo Команды: status, check, restart, start, stop, config, logs, install, uninstall
 set "RC=2"
 goto :end
 
@@ -48,11 +49,13 @@ echo   5. Открыть config.json
 echo   6. Открыть лог
 echo   7. Установить / обновить автозапуск
 echo   8. Удалить автозапуск
+echo   9. Проверка без перезапуска
 echo   0. Выход
 echo ============================================================
 echo.
-choice /C 123456780 /N /M "Выберите пункт: "
-if errorlevel 9 goto :menu_exit
+choice /C 1234567890 /N /M "Выберите пункт: "
+if errorlevel 10 goto :menu_exit
+if errorlevel 9 goto :menu_check
 if errorlevel 8 goto :menu_uninstall
 if errorlevel 7 goto :menu_install
 if errorlevel 6 goto :menu_logs
@@ -64,6 +67,12 @@ goto :menu_status
 
 :menu_status
 call :show_status
+echo.
+pause
+goto :menu_loop
+
+:menu_check
+call :do_check
 echo.
 pause
 goto :menu_loop
@@ -121,6 +130,11 @@ rem ==================================================================
 :direct_status
 call :show_status
 set "RC=0"
+goto :end
+
+:direct_check
+call :do_check
+set "RC=%errorlevel%"
 goto :end
 
 :direct_restart
@@ -190,6 +204,23 @@ if errorlevel 1 (
     echo.
     echo [!] Автозапуск не настроен. Запустите install.bat.
 )
+exit /b 0
+
+:do_check
+call :find_python
+if not defined PY_EXE (
+    echo [ОШИБКА] Python не найден. Запустите install.bat.
+    exit /b 1
+)
+echo ============================================================
+echo   Проверка без перезапуска
+echo ============================================================
+echo.
+"%PY_EXE%" "%SCRIPT_DIR%script.py" --check
+echo.
+"%PY_EXE%" "%SCRIPT_DIR%script.py" --dry-run
+echo.
+call :show_status
 exit /b 0
 
 :do_restart
