@@ -1,27 +1,23 @@
 @echo off
 chcp 65001 >nul
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Запуск от имени администратора...
-    powershell start -verb runas '%0'
-    exit /b
-)
+setlocal EnableExtensions
 cd /d "%~dp0"
+title RebootAppScript - диагностический запуск
 
-rem Проверяем существование виртуальной среды
-if exist ".venv\Scripts\activate.bat" (
-    echo Активируем виртуальную среду...
-    call ".venv\Scripts\activate.bat"
-) else if exist "venv\Scripts\activate.bat" (
-    echo Активируем виртуальную среду...
-    call "venv\Scripts\activate.bat"
-) else (
-    echo Виртуальная среда не найдена, использую системный Python
+call "%~dp0tools\find_python.bat" "%~dp0"
+if not defined PY_EXE (
+    echo [ОШИБКА] Python не найден. Запустите install.bat.
+    pause
+    exit /b 1
 )
 
-rem Запускаем скрипт
-python script.py
-
-rem Пауза
+echo ============================================================
+echo   Запуск супервизора в консоли (для диагностики)
+echo   Закрыть: Ctrl+C
+echo ============================================================
 echo.
+
+"%PY_EXE%" "%~dp0script.py" --daemon %*
+echo.
+echo Супервизор завершён.
 pause

@@ -1,6 +1,14 @@
 {
-  "target_time": "23:10",
+  "target_time": "00:00",
   "process_name": "assistant.exe",
-  "file_to_run": "C:/Program Files (x86)/Ассистент/assistant.exe",
-  "timeout": 60
+  "file_to_run": "C:\\Program Files (x86)\\Ассистент\\assistant.exe",
+  "app_args": [],
+  "timeout": 60,
+  "kill_timeout": 30,
+  "launch_retries": 3,
+  "launch_retry_delay": 10,
+  "launch_check_seconds": 20,
+  "start_if_not_running": true,
+  "startup_delay": 30,
+  "log_level": "INFO"
 }

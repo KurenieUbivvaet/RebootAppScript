@@ -1,0 +1,18 @@
+# Временные и создаваемые файлы
+__pycache__/
+*.pyc
+logs/
+state.json
+state.json.tmp
+.test/
+
+# Виртуальное окружение и артефакты сборки
+.venv/
+venv/
+build/
+dist/
+*.spec
+
+# Системные файлы
+Thumbs.db
+desktop.ini
