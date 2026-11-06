@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 
 APP_NAME = "RebootAppScript"
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 TASK_NAME = "RebootAppScript"
 
 IS_WINDOWS = os.name == "nt"
@@ -76,6 +76,7 @@ DEFAULTS = {
     "start_if_not_running": True,
     "startup_delay": 30,
     "log_level": "INFO",
+    "window_position": "primary",
 }
 
 log = logging.getLogger("rebootapp")
@@ -288,6 +289,13 @@ def load_config(path):
         )
     cfg["log_level"] = log_level
 
+    window_position = str(cfg["window_position"]).strip().lower()
+    if window_position not in ("keep", "primary"):
+        raise ConfigError(
+            'Параметр "window_position" должен быть "keep" или "primary"'
+        )
+    cfg["window_position"] = window_position
+
     return cfg
 
 
@@ -326,6 +334,31 @@ class PROCESSENTRY32W(ctypes.Structure):
     ]
 
 
+class RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
+    ]
+
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", RECT),
+        ("rcWork", RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+
 if IS_WINDOWS:
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
@@ -349,6 +382,41 @@ if IS_WINDOWS:
     _kernel32.WaitForSingleObject.restype = wintypes.DWORD
     _kernel32.ReleaseMutex.argtypes = [wintypes.HANDLE]
     _kernel32.ReleaseMutex.restype = wintypes.BOOL
+
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
+    _user32.EnumWindows.restype = wintypes.BOOL
+    _user32.GetWindowThreadProcessId.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    _user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    _user32.IsWindowVisible.restype = wintypes.BOOL
+    _user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    _user32.GetWindowTextLengthW.restype = ctypes.c_int
+    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetWindowTextW.restype = ctypes.c_int
+    _user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetClassNameW.restype = ctypes.c_int
+    _user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+    _user32.GetWindowRect.restype = wintypes.BOOL
+    _user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    _user32.MonitorFromWindow.restype = wintypes.HANDLE
+    _user32.MonitorFromPoint.argtypes = [POINT, wintypes.DWORD]
+    _user32.MonitorFromPoint.restype = wintypes.HANDLE
+    _user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
+    _user32.GetMonitorInfoW.restype = wintypes.BOOL
+    _user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    _user32.SetWindowPos.restype = wintypes.BOOL
 
 
 def list_processes():
@@ -385,6 +453,106 @@ def process_info_by_pid(pid):
         if current_pid == pid:
             return name
     return ""
+
+
+def is_main_window(class_name, title):
+    """Главное окно «Ассистента», а не окно сеанса удалённого управления."""
+    if class_name.startswith("TfmContainer"):
+        return True
+    return title.strip().casefold() == "ассистент" and "TApplication" not in class_name
+
+
+def find_visible_window(process_name, main_only=True):
+    """Первое видимое окно процесса с заголовком и нормальным размером."""
+    if not IS_WINDOWS:
+        return None
+    pids = set(find_pids(process_name))
+    if not pids:
+        return None
+
+    found = []
+
+    @WNDENUMPROC
+    def _callback(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value not in pids:
+            return True
+        if not _user32.IsWindowVisible(hwnd):
+            return True
+
+        length = _user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        title = ctypes.create_unicode_buffer(length + 1)
+        _user32.GetWindowTextW(hwnd, title, length + 1)
+
+        class_name = ctypes.create_unicode_buffer(256)
+        _user32.GetClassNameW(hwnd, class_name, 256)
+        if main_only and not is_main_window(class_name.value, title.value):
+            return True
+
+        rect = RECT()
+        if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return True
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        if width < 100 or height < 50:
+            return True
+
+        found.append(
+            {
+                "hwnd": int(hwnd),
+                "title": title.value,
+                "class": class_name.value,
+                "left": rect.left,
+                "top": rect.top,
+                "width": width,
+                "height": height,
+            }
+        )
+        return False
+
+    _user32.EnumWindows(_callback, 0)
+    return found[0] if found else None
+
+
+def move_window_to_primary(cfg):
+    """Переносит окно приложения на основной монитор (если так настроено)."""
+    if not IS_WINDOWS or cfg.get("window_position") != "primary":
+        return True
+
+    window = find_visible_window(cfg["process_name"])
+    if not window:
+        return False
+
+    hwnd = wintypes.HWND(window["hwnd"])
+    primary = _user32.MonitorFromPoint(POINT(0, 0), 1)
+    current = _user32.MonitorFromWindow(hwnd, 0)
+    if current == primary:
+        return True
+
+    info = MONITORINFO()
+    info.cbSize = ctypes.sizeof(MONITORINFO)
+    if not _user32.GetMonitorInfoW(primary, ctypes.byref(info)):
+        log.warning("Не удалось определить размеры основного монитора")
+        return False
+
+    work = info.rcWork
+    width = window["width"]
+    height = window["height"]
+    x = work.left + max(0, (work.right - work.left - width) // 2)
+    y = work.top + max(0, (work.bottom - work.top - height) // 2)
+
+    if not _user32.SetWindowPos(hwnd, None, x, y, 0, 0, 0x0001 | 0x0040):
+        log.warning(
+            "Не удалось перенести окно на основной монитор (код %s)",
+            ctypes.get_last_error(),
+        )
+        return False
+
+    log.info("Окно приложения перенесено на основной монитор")
+    return True
 
 
 def is_admin():
@@ -504,6 +672,11 @@ def launch_app(cfg):
         )
         return False
 
+    existing = find_visible_window(cfg["process_name"])
+    if existing:
+        log.info("Окно «%s» уже открыто - запуск не требуется", existing["title"])
+        return True
+
     command = [str(exe_path)] + list(cfg["app_args"])
     log.info("Запускаю: %s", subprocess.list2cmdline(command))
     try:
@@ -519,14 +692,18 @@ def launch_app(cfg):
 
     deadline = time.monotonic() + cfg["launch_check_seconds"]
     while time.monotonic() < deadline:
-        if find_pids(cfg["process_name"]):
-            log.info("Приложение запущено (PID: %s)", process.pid)
+        window = find_visible_window(cfg["process_name"])
+        if window:
+            log.info(
+                "Приложение запущено, окно «%s» (PID запуска: %s)",
+                window["title"],
+                process.pid,
+            )
             return True
         time.sleep(0.5)
 
     log.error(
-        "Процесс %s не появился за %d с после запуска",
-        cfg["process_name"],
+        "Окно приложения не появилось за %d с после запуска",
         cfg["launch_check_seconds"],
     )
     return False
@@ -534,15 +711,24 @@ def launch_app(cfg):
 
 def start_app(cfg, reason=""):
     if find_pids(cfg["process_name"]):
-        log.info("Приложение уже запущено - запуск не требуется")
-        return True
+        window = find_visible_window(cfg["process_name"])
+        if window:
+            log.info(
+                "Приложение уже запущено, окно «%s» найдено - запуск не требуется",
+                window["title"],
+            )
+            return True
+        log.info(
+            "Процесс %s работает, но окно не найдено - запускаю, чтобы открыть интерфейс",
+            cfg["process_name"],
+        )
 
     if reason:
         log.info("%s", reason)
     attempts = cfg["launch_retries"] + 1
     for attempt in range(1, attempts + 1):
-        if find_pids(cfg["process_name"]):
-            log.info("Приложение уже запущено - запуск не требуется")
+        if find_visible_window(cfg["process_name"]):
+            log.info("Окно приложения уже открыто - запуск не требуется")
             return True
         log.info("Запуск приложения (попытка %d из %d)", attempt, attempts)
         if launch_app(cfg):
@@ -550,7 +736,7 @@ def start_app(cfg, reason=""):
         if attempt < attempts:
             log.warning("Повторная попытка через %d с", cfg["launch_retry_delay"])
             time.sleep(cfg["launch_retry_delay"])
-    log.error("Не удалось запустить приложение после %d попыток", attempts)
+    log.error("Не удалось открыть окно приложения после %d попыток", attempts)
     return False
 
 
@@ -692,27 +878,21 @@ def perform_restart(cfg, reason, state_path):
                     "Процесс всё ещё работает. Запуск отменён, чтобы не создать "
                     "второй экземпляр. Проверьте права администратора."
                 )
-            elif state == "replaced":
-                message = "процесс уже перезапущен внешней службой"
-                log.warning(
-                    "Процесс завершился и был запущен другой службой - "
-                    "повторный запуск не требуется"
-                )
-                success = True
             else:
+                if state == "replaced":
+                    log.warning(
+                        "Процесс уже поднят внешней службой - после паузы проверю окно"
+                    )
                 if cfg["timeout"] > 0:
                     log.info("Пауза %d с перед запуском", cfg["timeout"])
                     time.sleep(cfg["timeout"])
-                if find_pids(cfg["process_name"]):
-                    log.warning(
-                        "Во время паузы приложение уже запустилось - новый экземпляр не нужен"
-                    )
-                    success = True
-                else:
-                    success = start_app(cfg, "Запускаю приложение")
+                success = start_app(cfg, "Проверяю окно приложения")
         else:
             log.warning("Приложение не запущено - завершение не требуется")
             success = start_app(cfg, "Запускаю приложение")
+
+        if success:
+            move_window_to_primary(cfg)
 
         if success and not message:
             message = "перезапуск выполнен"
@@ -807,11 +987,8 @@ def run_daemon(cfg, state_path):
             target = next_occurrence(cfg["_hour"], cfg["_minute"])
 
         if cfg["start_if_not_running"] and not stop_event.is_set():
-            if find_pids(cfg["process_name"]):
-                log.info("Приложение уже запущено")
-            else:
-                log.info("Приложение не запущено - запускаю")
-                start_app(cfg)
+            if start_app(cfg):
+                move_window_to_primary(cfg)
 
         log.info(
             "Следующий перезапуск: %s (через %s)",
@@ -858,6 +1035,7 @@ def next_run_text(cfg):
 def print_restart_plan(cfg, config_path):
     """Показывает, что произойдёт при перезапуске, но ничего не делает."""
     pids = find_pids(cfg["process_name"])
+    window = find_visible_window(cfg["process_name"])
     app_path = Path(cfg["file_to_run"])
     command = [str(app_path)] + list(cfg["app_args"])
 
@@ -874,6 +1052,8 @@ def print_restart_plan(cfg, config_path):
         )
         print("   taskkill /F /T /IM %s" % cfg["process_name"])
         print("   ждать завершения до %d с" % cfg["kill_timeout"])
+        if not window:
+            print("   окно сейчас не найдено - после паузы будет запущен assistant.exe")
     else:
         print(
             "1. Процесс %s не запущен - завершение не требуется"
@@ -884,7 +1064,7 @@ def print_restart_plan(cfg, config_path):
     print("3. Запустить: %s" % subprocess.list2cmdline(command))
     print("   рабочая папка: %s" % app_path.parent)
     print(
-        "4. Проверить процесс: до %d с, попыток запуска: %d"
+        "4. Проверить, что окно открылось: до %d с, попыток запуска: %d"
         % (cfg["launch_check_seconds"], cfg["launch_retries"] + 1)
     )
     print()
@@ -920,11 +1100,22 @@ def print_status(cfg, config_path):
     print()
 
     pids = find_pids(cfg["process_name"])
+    window = find_visible_window(cfg["process_name"])
     if pids:
         print(
             "Приложение: %s - ЗАПУЩЕНО (PID: %s)"
             % (cfg["process_name"], ", ".join(str(pid) for pid in pids))
         )
+        if window:
+            print("Окно:       «%s» открыто" % window["title"])
+        else:
+            remote = find_visible_window(cfg["process_name"], main_only=False)
+            if remote:
+                print(
+                    "Окно:       главное не найдено (открыто: «%s»)" % remote["title"]
+                )
+            else:
+                print("Окно:       НЕ НАЙДЕНО (процесс работает в фоне)")
     else:
         print("Приложение: %s - НЕ ЗАПУЩЕНО" % cfg["process_name"])
 
@@ -1103,6 +1294,8 @@ def main(argv=None):
 
     if args.ensure_running:
         success = start_app(cfg, "Проверка приложения")
+        if success:
+            move_window_to_primary(cfg)
         print("Приложение запущено" if success else "Не удалось запустить приложение")
         return 0 if success else 1
 
